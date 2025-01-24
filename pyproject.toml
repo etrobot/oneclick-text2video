@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "oneclick-text2video"
+version = "0.1.0"
+description = "A tool to generate videos from text using AI"
+authors = ["Frank Lin <etrobot@outlook.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+requests = "*"
+azure-cognitiveservices-speech = "*"
+numpy = "*"
+moviepy = "*"
+openai = "*"
+python-dotenv = "*"
+streamlit = "^1.41.1"
