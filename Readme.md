@@ -23,8 +23,6 @@ SILICONFLOW_BASE_URL=https://api.siliconflow.cn/v1
 SILICONFLOW_API_KEY=你的SiliconFlow API密钥
 LLM_MODEL='deepseek-ai/DeepSeek-V2.5'
 AZURE_TTS=你的Azure TTS订阅密钥
-OPENAI_API_KEY=你的OpenAI API密钥
-OPENAI_BASE_URL=https://groq-proxy-pool.erlich.fun/v1
 ```
 
 请确保将上述占位符替换为你的实际 API 密钥。

@@ -1,6 +1,6 @@
 import requests
-import random
-import json
+import random,time
+import os,json
 import logging
 from openai import OpenAI
 
@@ -94,8 +94,8 @@ class SiliconFlow:
         
         if "requestId" in response_data:
             request_id = response_data["requestId"]
+            time.sleep(30)
             while True:
-                time.sleep(10)
                 status_response = self.check_video_status(request_id)
                 logger.info(f"Video status check response: {status_response}")
                 
@@ -106,6 +106,7 @@ class SiliconFlow:
                 elif status_response["status"] in ["Failed", "Cancelled"]:
                     logger.error(f"Video generation failed: {status_response.get('reason')}")
                     return None
+                time.sleep(10)
         
         logger.error("Failed to get request ID for video generation")
         return None

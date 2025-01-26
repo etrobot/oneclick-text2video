@@ -1,5 +1,5 @@
 import requests
-import os,time
+import os
 import azure.cognitiveservices.speech as speechsdk
 import numpy as np
 from moviepy import vfx
@@ -64,95 +64,84 @@ def log_method(debug=True):
     return decorator
 
 def llm_gen_json(llm:openai.Client,model:str,query:str,format:dict,debug=False,max_retries:int=20)->dict:
-    logger=DebugLogger(debug=debug)
+    logger=DebugLogger(debug=True)  # 强制开启调试日志
+    logger.log('info', f"开始生成JSON，查询内容: {query}")
     prompt= f"\noutput in json format :\n{str(format)}\n"
     retry=max_retries
     while retry>0:
         try:
+            logger.log('info', f"尝试请求 LLM (剩余重试次数: {retry})")
             llm_response = llm.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": query+prompt}],
                 response_format={ "type": "json_object" }
             )
             result=json.loads(llm_response.choices[0].message.content)
+            logger.log('info', f"收到响应: {result}")
+            
             if not isinstance(result, dict):
                 if isinstance(result, list) and len(result)>0 and isinstance(result[0], dict):
                     result = result[0]
+                    logger.log('info', "将列表结果转换为字典")
                 else:
-                    logger.log('error', f"Invalid action received, will retry\n{result}\n")
+                    logger.log('error', f"无效的响应格式，将重试\n{result}\n")
+                    retry -= 1
                     continue
-                if not all(k in result for k in format):
-                    logger.log('error', f"Invalid action received, will retry\n{result}\n")
-                    continue
+            if not all(k in result for k in format):
+                logger.log('error', f"响应缺少必要字段，将重试\n{result}\n")
+                retry -= 1
+                continue
+            logger.log('info', f"成功生成JSON结果: {result}")
             return result
         except Exception as e:
-            logger.log('error', e)
-            time.sleep((max_retries-retry)*10)
+            logger.log('error', f"发生错误: {str(e)}")
+            time.sleep(2)  # 固定等待时间，避免过长延迟
             retry-=1
             continue
+    logger.log('error', "达到最大重试次数，返回 None")
     return None
 
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('video_editor.log'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
-
-
-@log_method(debug=False)  # 将 debug 设置为 False
-def text2voice(text:str, audioFile='result',voice_name='zh-CN-guangxi-YunqiNeural'):
-    # 创建音频输出目录
-    os.makedirs('output/audio', exist_ok=True)
-    filename = os.path.join('output/audio', audioFile + '.mp3')
-    speech_config = speechsdk.SpeechConfig(subscription=os.getenv('AZURE_TTS'), region="eastasia")
-    speech_config.set_speech_synthesis_output_format(speechsdk.SpeechSynthesisOutputFormat.Audio48Khz192KBitRateMonoMp3)
-    audio_config = speechsdk.audio.AudioOutputConfig(filename=filename)
-
-    speech_config.speech_synthesis_voice_name = voice_name
-
-    speech_synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
-    ssml = f"""
-    <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="zh-CN">
-        <voice name="{voice_name}">
-         <lexicon uri="https://raw.githubusercontent.com/etrobot/azure-tts-lexicon-cn/refs/heads/main/lexicon.xml"/>
-            <mstts:express-as style="cheerful">
-                <prosody rate="+20%" volume="-1%">
-                    {text}
-                </prosody>
-            </mstts:express-as>
-        </voice>
-    </speak>
-    """
-    word_boundaries = []
-    def handle_word_boundary(evt):
-        # 移除调试打印
-        word_boundaries.append({
-            'text': evt.text,
-            'audio_offset': evt.audio_offset / 10000000,
-            'duration': evt.duration.total_seconds(),
-        })
+@log_method(debug=True)  # 开启调试日志
+def extract_keywords(text):
+    logger = logging.getLogger(__name__)
+    logger.info(f"开始提取关键词，文本内容: {text}")
     
-    speech_synthesizer.synthesis_word_boundary.connect(handle_word_boundary)
-
-    result = speech_synthesizer.speak_ssml_async(ssml).get()
-    if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-        print("Speech synthesized to speaker for text [{}]".format(text))
-        stream = speechsdk.AudioDataStream(result)
-        stream.save_to_wav_file(filename)
+    api_key, base_url = get_llm_config('siliconflow')
+    keywords_format = {
+        "keywords": ["keyword1", "keyword2", "keyword3"]
+    }
+    client = openai.Client(api_key=api_key, base_url=base_url)
+    prompt = f'''
+    generate 3-5 short stable diffusion prompts in English for the following video script with the structure as location+role+action+object like "in the office, a ol is taking to the screen, the video script is":
+    text: {text}
+    '''
     
-    return filename, word_boundaries
-
+    logger.info("开始调用 LLM 生成关键词")
+    keywords = llm_gen_json(client, os.getenv('LLM_MODEL'), prompt, keywords_format)
+    
+    if not keywords:
+        logger.warning("生成关键词失败，使用默认关键词")
+        return ["happy celebration", "festive atmosphere", "red lantern"]
+        
+    result = keywords.get('keywords', [])
+    logger.info(f"生成的关键词: {result}")
+    
+    # 过滤非ASCII字符的关键词
+    filtered_keywords = [k for k in result if k.isascii()]
+    logger.info(f"过滤后的关键词: {filtered_keywords}")
+    
+    if not filtered_keywords:
+        logger.warning("过滤后没有有效关键词，使用默认关键词")
+        return ["happy celebration", "festive atmosphere", "red lantern"]
+        
+    return filtered_keywords[:3]  # 限制返回3个关键词
 
 @log_method()
 def prepare_assets_with_videos(asset):
     logger = logging.getLogger(__name__)
-    logger.info(f"Starting to prepare assets with videos for text: {asset['text']}")
+    # 打印入参信息
+    logger.info(f"入参 asset: {json.dumps({k: str(v) if not isinstance(v, (list, dict)) else v for k, v in asset.items()}, ensure_ascii=False, indent=2)}")
+    
     audio = AudioFileClip(asset['audio_file'])
     audio_duration = audio.duration
     asset['duration'] = audio_duration
@@ -165,19 +154,20 @@ def prepare_assets_with_videos(asset):
     os.makedirs('videos', exist_ok=True)
     
     total_video_duration = 0
-    
-    for keyword in keywords:
-        logger.info(f"Processing keyword: {keyword}")
-        if total_video_duration >= audio_duration:
-            logger.info("Total video duration reached audio duration, stopping")
-            break
+    keyword_index = 0
+    max_attempts = 10  # 防止无限循环
+    attempts = 0
+
+    while total_video_duration < audio_duration and attempts < max_attempts:
+        keyword = keywords[keyword_index % len(keywords)]
+        keyword_index += 1
+        logger.info(f"当前处理: 关键词={keyword}, 已生成视频时长={total_video_duration:.2f}秒, 目标音频时长={audio_duration:.2f}秒, 尝试次数={attempts + 1}")
             
         image_url = sf.generate_image(keyword)
         if image_url:
             video_url = sf.generate_video(keyword, image_url)
             if video_url:
                 try:
-                    # 下载视频到本地临时文件
                     response = requests.get(video_url)
                     temp_video_path = f'videos/temp_{int(time.time())}.mp4'
                     with open(temp_video_path, 'wb') as f:
@@ -188,12 +178,13 @@ def prepare_assets_with_videos(asset):
                     video_clip.close()
                     
                     total_video_duration += video_duration
-                    asset['videos'].append(video_url)
+                    asset['videos'].append(temp_video_path)
+                    logger.info(f"成功添加视频: 路径={temp_video_path}, 时长={video_duration:.2f}秒, 累计视频时长={total_video_duration:.2f}秒")
                     
-                    # 清理临时文件
-                    os.remove(temp_video_path)
+                    attempts += 1
                 except Exception as e:
                     logger.error(f"Error processing video: {str(e)}")
+                    attempts += 1
                     continue
     
     # 在返回之前检查是否成功生成了视频
@@ -201,32 +192,17 @@ def prepare_assets_with_videos(asset):
         raise Exception("未能成功生成任何视频素材")
     
     audio.close()
+    
+    # 打印出参信息
+    logger.info(f"出参 asset: {json.dumps({k: str(v) if not isinstance(v, (list, dict)) else v for k, v in asset.items()}, ensure_ascii=False, indent=2)}")
     return asset
 
-@log_method(debug=False)  # 将 debug 设置为 False
-def extract_keywords(text):
-    api_key, base_url = get_llm_config('siliconflow')
-    keywords_format = {
-    "keywords": ["keyword1", "keyword2", "keyword3"]
-}
-    client = openai.Client(api_key=api_key, base_url=base_url)
-    # text = client.chat.completions.create(
-    #     model=model,
-    #     messages=[{"role": "user", "content":text+'for this video script, generate as many fun gif names as possible, output in English'}]
-    # ).choices[0].message.content
-    prompt= f'''
-    generate short stable diffusion prompts for the following video script:
-    text: {text}
-    '''
-    while True:
-        keywords = llm_gen_json(client,os.getenv('LLM_MODEL'),prompt,keywords_format)['keywords']
-        if all(keyword.isascii() for keyword in keywords):
-            break
-    # 移除 print(keywords)
-    return keywords
 
 @log_method()
 def create_video_from_assets(asset, output_path, vertical=False):
+    logger = logging.getLogger(__name__)
+    logger.info(f"开始处理视频资源，视频数量: {len(asset['videos'])}")
+    
     """
     将音频文件和对应的视频序列合成为视频，支持横屏(720p)和竖屏(1080x1920)
     """
@@ -299,11 +275,12 @@ def create_video_from_assets(asset, output_path, vertical=False):
     # 创建一个固定的黑色背景
     background = ColorClip(size=(video_width, video_height), color=(0,0,0))
     
+    # 处理所有视频片段
     for video_path in asset['videos']:
+        logger.info(f"处理视频片段: {video_path}, 当前时间点: {current_time:.2f}秒")
         video = VideoFileClip(video_path)
         
         # 修改视频缩放逻辑，确保视频填满画面
-        # 计算缩放比例，使视频的短边至少等于目标尺寸的对应边
         width_ratio = video_width / video.w
         height_ratio = video_height / video.h
         scale_ratio = max(width_ratio, height_ratio)
@@ -313,7 +290,7 @@ def create_video_from_assets(asset, output_path, vertical=False):
         
         video = video.resized(width=new_width, height=new_height)
         
-        # 计算居中位置，确保视频居中显示
+        # 计算居中位置
         x_center = (video_width - new_width) // 2
         y_center = (video_height - new_height) // 2
         
@@ -321,15 +298,14 @@ def create_video_from_assets(asset, output_path, vertical=False):
         remaining_duration = audio_duration - current_time
         if video.duration > remaining_duration:
             video = video.subclipped(0, remaining_duration)
+            logger.info(f"裁剪视频到 {remaining_duration:.2f}秒")
         
-        # 添加视频转场和动画效果
-        # video = (video
-        #         .with_effects([vfx.Resize(lambda t: 1 + 0.05 * np.sin(t * np.pi))])
-        #         .with_position((x_center, y_center)).with_start(current_time))
-
-        # 设置视频素材的开始时间和位置
-        current_time += video.duration
+        # 设置视频开始时间和位置（使用 with_position 和 with_start）
+        video = video.with_position((x_center, y_center)).with_start(current_time)
+        logger.info(f"设置视频位置: ({x_center}, {y_center}), 开始时间: {current_time:.2f}秒, 时长: {video.duration:.2f}秒")
+        
         video_clips.append(video)
+        current_time += video.duration
     
     # 设置背景持续时间与音频相同
     background = background.with_duration(audio_duration)
@@ -338,6 +314,7 @@ def create_video_from_assets(asset, output_path, vertical=False):
     all_clips = [background] + video_clips + subtitle_clips
     
     # 合并所有视频片段
+    logger.info(f"开始合并视频片段，总片段数: {len(all_clips)}")
     final_video = CompositeVideoClip(all_clips, size=(video_width, video_height))
     
     # 添加音频
@@ -427,7 +404,18 @@ def text2voice(text:str, auto_increment=True, id=None, voice_name='zh-CN-guangxi
     
     return filename, word_boundaries, base_filename
 
+@log_method()
 def text2video(videoscript:str):
+    """
+    将文本脚本转换为视频
+    Args:
+        videoscript: 包含多行文本的字符串，每行将被转换为一个视频片段
+    Returns:
+        dict: 包含所有生成资产信息的字典
+    """
+    logger = logging.getLogger(__name__)
+    logger.info(f"开始处理视频脚本: {videoscript}")
+    
     # 创建所有必要的输出目录
     os.makedirs('output', exist_ok=True)
     os.makedirs('output/video', exist_ok=True)
@@ -442,9 +430,13 @@ def text2video(videoscript:str):
         if not line.strip():
             continue
             
-        # Unpack three values from text2voice
+        logger.info(f"处理第 {id} 行文本: {line}")
+        
+        # 使用 text2voice 生成音频和字幕信息
         audio_file, word_boundaries, base_filename = text2voice(line, auto_increment=True)
         video_path = os.path.join('output/video', f"{base_filename}.mp4")
+        
+        logger.info(f"生成的音频文件: {audio_file}")
         
         assets[id] = {
             'audio_file': audio_file,
@@ -454,14 +446,23 @@ def text2video(videoscript:str):
             'base_filename': base_filename
         }
         
+        # 准备视频素材
+        logger.info(f"开始准备视频素材")
         assets[id] = prepare_assets_with_videos(assets[id])
+        
+        # 创建最终视频
+        logger.info(f"开始创建最终视频: {video_path}")
         assets[id] = create_video_from_assets(assets[id], video_path)
         
+        # 生成缩略图
+        logger.info(f"生成视频缩略图")
         thumbnail = generate_thumbnail(video_path)
         assets[id]['thumbnail'] = thumbnail
         
+        logger.info(f"完成第 {id} 行文本的处理")
         id += 1
     
+    logger.info(f"视频生成完成，共处理 {id-1} 个片段")
     return assets
 
 @log_method(debug=False)
@@ -489,37 +490,6 @@ def generate_thumbnail(video_path, thumbnail_path=None):
     except Exception as e:
         logger.error(f"生成缩略图时发生错误: {str(e)}")
         return None
-
-def text2video(videoscript:str):
-    # 创建视频输出目录
-    os.makedirs('output/video', exist_ok=True)
-    
-    script_lines = videoscript.split('\n')
-    assets = {}
-    id=1
-    for line in script_lines:
-        # Skip empty lines or lines with only whitespace
-        if not line.strip():
-            continue
-        audio_file, word_boundaries = text2voice(line,f"output_audio_{id}.mp3")
-        output_path = os.path.join('output/video', f"output_video_{id}.mp4")
-        
-        assets[id] = {
-            'audio_file': audio_file,
-            'text': line,
-            'word_boundaries': word_boundaries,
-            'video_file': output_path
-        }
-        
-        assets[id] = prepare_assets_with_videos(assets[id])
-        assets[id] = create_video_from_assets(assets[id], output_path)
-        
-        thumbnail = generate_thumbnail(output_path)
-        assets[id]['thumbnail'] = thumbnail
-        
-        id+=1
-    
-    return assets
 
 @log_method()
 def merge_videos(video_files, output_path):
