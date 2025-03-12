@@ -1,16 +1,26 @@
-[tool.poetry]
+[project]
 name = "oneclick-text2video"
 version = "0.1.0"
 description = "A tool to generate videos from text using AI"
-authors = ["Frank Lin <etrobot@outlook.com>"]
+authors = [
+    { name = "Frank Lin", email = "etrobot@outlook.com" }
+]
 readme = "README.md"
+dependencies = [
+    "aiofiles>=24.1.0",
+    "azure-cognitiveservices-speech>=1.42.0",
+    "fastapi>=0.115.11",
+    "jinja2>=3.1.6",
+    "moviepy>=2.1.2",
+    "numpy>=2.2.3",
+    "openai>=1.66.2",
+    "pillow>=10.4.0",
+    "python-dotenv>=1.0.1",
+    "python-multipart>=0.0.20",
+    "requests>=2.32.3",
+    "streamlit>=1.43.2",
+    "uvicorn>=0.34.0",
+]
 
-[tool.poetry.dependencies]
-python = "^3.10"
-requests = "*"
-azure-cognitiveservices-speech = "*"
-numpy = "*"
-moviepy = "*"
-openai = "*"
-python-dotenv = "*"
-streamlit = "^1.41.1"
+[tool.setuptools.packages.find]
+include = ["app", "silicon_flow", "makevideo"]

@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>文本生成视频</title>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .video-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen p-8">
+    <div class="max-w-7xl mx-auto">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <!-- 左侧编辑器 -->
+            <div class="bg-white p-6 rounded-lg shadow-lg">
+                <h2 class="text-2xl font-bold mb-4">文本编辑器</h2>
+                <div class="mb-4">
+                    <textarea
+                        id="script"
+                        name="script"
+                        class="w-full h-48 p-4 border rounded-lg"
+                        placeholder="请输入文本..."
+                    ></textarea>
+                </div>
+                <button
+                    class="bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600"
+                    hx-post="/generate-video"
+                    hx-trigger="click"
+                    hx-include="#script"
+                    hx-indicator="#spinner"
+                >
+                    生成视频
+                </button>
+                <div id="spinner" class="htmx-indicator">
+                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                </div>
+            </div>
+
+            <!-- 右侧预览 -->
+            <div class="bg-white p-6 rounded-lg shadow-lg">
+                <h2 class="text-2xl font-bold mb-4">视频预览</h2>
+                <div id="video-preview" class="mb-8">
+                    {% if video_files %}
+                        <video id="current-video" controls class="w-full rounded-lg shadow">
+                            <source src="/video/{{ video_files[0].split('/')[-1] }}" type="video/mp4">
+                            您的浏览器不支持视频播放。
+                        </video>
+                    {% else %}
+                        <div class="text-gray-500 text-center py-8">
+                            没有可用的视频。请先生成视频。
+                        </div>
+                    {% endif %}
+                </div>
+
+                <h3 class="text-xl font-bold mb-4">视频片段</h3>
+                <div class="video-grid">
+                    {% for video_file in video_files %}
+                        {% set video_name = video_file.split('/')[-1] %}
+                        <div class="video-thumbnail">
+                            <img
+                                src="/thumbnail/{{ video_name }}"
+                                alt="视频缩略图"
+                                class="w-full h-32 object-cover rounded cursor-pointer"
+                                onclick="document.getElementById('current-video').src = '/video/{{ video_name }}'"
+                            >
+                            <p class="text-sm text-gray-600 mt-1">片段 {{ loop.index }}</p>
+                        </div>
+                    {% endfor %}
+                </div>
+
+                {% if video_files %}
+                    <div class="mt-8">
+                        <button
+                            class="bg-green-500 text-white px-6 py-2 rounded-lg hover:bg-green-600"
+                            hx-post="/merge-videos"
+                            hx-trigger="click"
+                            hx-indicator="#merge-spinner"
+                        >
+                            合并所有视频
+                        </button>
+                        <div id="merge-spinner" class="htmx-indicator">
+                            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500"></div>
+                        </div>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 通知区域 -->
+    <div id="notifications" class="fixed bottom-4 right-4"></div>
+
+    <script>
+        document.body.addEventListener('htmx:afterRequest', function(evt) {
+            const response = evt.detail.xhr.response;
+            if (response) {
+                try {
+                    const data = JSON.parse(response);
+                    if (data.message) {
+                        showNotification(data.message, 'success');
+                        // 如果生成了新视频，刷新页面
+                        if (data.video_files || data.video_path) {
+                            setTimeout(() => location.reload(), 1000);
+                        }
+                    } else if (data.error) {
+                        showNotification(data.error, 'error');
+                    }
+                } catch (e) {
+                    // 响应可能不是JSON格式
+                }
+            }
+        });
+
+        function showNotification(message, type) {
+            const notification = document.createElement('div');
+            notification.className = `p-4 rounded-lg shadow-lg mb-2 ${
+                type === 'success' ? 'bg-green-500' : 'bg-red-500'
+            } text-white`;
+            notification.textContent = message;
+            
+            const notifications = document.getElementById('notifications');
+            notifications.appendChild(notification);
+            
+            setTimeout(() => notification.remove(), 3000);
+        }
+    </script>
+</body>
+</html> 
