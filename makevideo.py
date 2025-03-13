@@ -164,29 +164,35 @@ def prepare_assets_with_videos(asset):
         logger.info(f"当前处理: 关键词={keyword}, 已生成视频时长={total_video_duration:.2f}秒, 目标音频时长={audio_duration:.2f}秒, 尝试次数={attempts + 1}")
             
         image_url = sf.generate_image(keyword)
-        if image_url:
-            video_url = sf.generate_video(keyword, image_url)
-            if video_url:
-                try:
-                    response = requests.get(video_url)
-                    temp_video_path = f'videos/temp_{int(time.time())}.mp4'
-                    with open(temp_video_path, 'wb') as f:
-                        f.write(response.content)
-                    
-                    video_clip = VideoFileClip(temp_video_path)
-                    video_duration = video_clip.duration
-                    video_clip.close()
-                    
-                    total_video_duration += video_duration
-                    asset['videos'].append(temp_video_path)
-                    logger.info(f"成功添加视频: 路径={temp_video_path}, 时长={video_duration:.2f}秒, 累计视频时长={total_video_duration:.2f}秒")
-                    
-                    attempts += 1
-                except Exception as e:
-                    logger.error(f"Error processing video: {str(e)}")
-                    attempts += 1
-                    continue
-    
+        if not image_url:
+            attempts += 1
+            continue
+
+        video_url = sf.generate_video(keyword, image_url)
+        if not video_url:
+            attempts += 1
+            continue
+
+        try:
+            response = requests.get(video_url)
+            temp_video_path = f'videos/temp_{int(time.time())}.mp4'
+            with open(temp_video_path, 'wb') as f:
+                f.write(response.content)
+            
+            video_clip = VideoFileClip(temp_video_path)
+            video_duration = video_clip.duration
+            video_clip.close()
+            
+            total_video_duration += video_duration
+            asset['videos'].append(temp_video_path)
+            logger.info(f"成功添加视频: 路径={temp_video_path}, 时长={video_duration:.2f}秒, 累计视频时长={total_video_duration:.2f}秒")
+        except Exception as e:
+            logger.error(f"Error processing video: {str(e)}")
+            attempts += 1
+            if os.path.exists(temp_video_path):
+                os.remove(temp_video_path)
+            continue
+
     # 在返回之前检查是否成功生成了视频
     if not asset['videos']:
         raise Exception("未能成功生成任何视频素材")
@@ -224,51 +230,73 @@ def create_video_from_assets(asset, output_path, vertical=False):
     # 根据标点符号分割文本
     sentences = []
     current_sentence = []
+    current_sentence_boundaries = []
     current_start = word_boundaries[0]['audio_offset']
     
     for i, word_info in enumerate(word_boundaries):
         word = word_info['text']
-        if word not in ['.', '!', '?', ',','，','？','。']:  # 如果不是标点，添加到当前句子
+        if word not in ['.', '!', '?', ',','，','？','。']:
             current_sentence.append(word)
+            current_sentence_boundaries.append(word_info)
             
-        # 检查原始文本中这个词后面是否跟着标点符号
+        # 检查是否需要结束当前句子
         word_end_pos = text.find(word) + len(word)
         next_char = text[word_end_pos:word_end_pos+1] if word_end_pos < len(text) else ''
         
-        # 如果下一个字符是标点或者是最后一个词，结束当前句子
         if (next_char in ['.', '!', '?', ',','，','？','。'] or 
             i == len(word_boundaries) - 1):
-            sentences.append({
-                'text': ' '.join(current_sentence),
-                'start': current_start,
-                'end': word_info['audio_offset'] + word_info['duration']
-            })
+            if current_sentence:
+                sentences.append({
+                    'words': current_sentence.copy(),
+                    'boundaries': current_sentence_boundaries.copy(),
+                    'start': current_start,
+                    'end': word_info['audio_offset'] + word_info['duration']
+                })
             if i < len(word_boundaries) - 1:
                 current_start = word_boundaries[i + 1]['audio_offset']
             current_sentence = []
+            current_sentence_boundaries = []
     
-    # 为每个字创建带动画效果的TextClip
-    for word_info in word_boundaries:
-        word = word_info['text']
-        start_time = word_info['audio_offset']
-        duration = word_info['duration']
-        
-        # 创建逐字字幕
-        text_clip = (TextClip(text=word, 
-                            font='Hiragino Sans GB',
-                            font_size=45,
-                            size=(text_width, None),
-                            color='white',
-                            stroke_color='black',
-                            stroke_width=2,
-                            method='caption',
-                            text_align='center')
-                    .with_position(('center', video_height * 0.85))
-                    .with_start(start_time)
-                    .with_duration(duration))
-        
-        subtitle_clips.append(text_clip)
-
+    # 为每个句子创建字幕
+    subtitle_clips = []
+    for sentence in sentences:
+        # 为句子中的每个词创建一个高亮版本
+        for i, word_info in enumerate(sentence['boundaries']):
+            word = sentence['words'][i]
+            word_start = word_info['audio_offset']
+            word_duration = word_info['duration']
+            
+            # 构建带高亮词的句子文本
+            sentence_text = []
+            for j, w in enumerate(sentence['words']):
+                if j == i:
+                    # 当前词使用黄色
+                    text_clip = (TextClip(text=w, 
+                                        font='Hiragino Sans GB',
+                                        font_size=45,
+                                        size=(text_width, None),
+                                        color='yellow',  # 高亮词使用黄色
+                                        stroke_color='black',
+                                        stroke_width=2,
+                                        method='caption')
+                               .with_position(('center', video_height * 0.85))
+                               .with_start(word_start)
+                               .with_duration(word_duration))
+                else:
+                    # 其他词使用白色
+                    text_clip = (TextClip(text=w, 
+                                        font='Hiragino Sans GB',
+                                        font_size=45,
+                                        size=(text_width, None),
+                                        color='white',
+                                        stroke_color='black',
+                                        stroke_width=2,
+                                        method='caption')
+                               .with_position(('center', video_height * 0.85))
+                               .with_start(word_start)
+                               .with_duration(word_duration))
+                subtitle_clips.append(text_clip)
+    
     video_clips = []
     current_time = 0
     

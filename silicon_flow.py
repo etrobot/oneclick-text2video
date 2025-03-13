@@ -41,7 +41,7 @@ class SiliconFlow:
         logger = logging.getLogger(__name__)
         logger.info(f"Generating image for prompt: {prompt}")
         
-        realistic_prmt=f'Masterful photography, Leica camera, crisp details, soft bokeh, {prompt}, shot by Annie Leibovitz, cinematic lighting, sharp focus'
+        realistic_prmt=f'{prompt}, Masterful photography, crisp details, soft bokeh, shot by Annie Leibovitz, cinematic lighting, sharp focus'
         scifi_prmt=f'Epic sci-fi movie scene, {prompt}, Blade Runner aesthetic, Denis Villeneuve cinematography, cyberpunk cityscape, neon lights, high contrast, dramatic lighting, hyper-realistic details, 8K resolution'
         prmt_dict={
             'realistic':realistic_prmt,
