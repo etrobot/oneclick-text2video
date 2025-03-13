@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 from makevideo import text2video, merge_videos
 import shutil
+import datetime
 
 # 配置日志
 logging.basicConfig(
@@ -21,6 +22,10 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
+
+# 在挂载静态文件前创建'static'目录
+os.makedirs("static", exist_ok=True)
+logger.info("静态文件夹 'static' 已创建或已存在")
 
 # 挂载静态文件
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -43,7 +48,7 @@ async def home(request: Request):
     )
 
 @app.post("/generate-video")
-async def generate_video(script: str = Form(...)):
+async def generate_video(script: str = Form(...), task_id: str = Form(None)):
     try:
         if not script.strip():
             return JSONResponse(
@@ -51,14 +56,20 @@ async def generate_video(script: str = Form(...)):
                 content={"error": "请输入文本"}
             )
             
-        # 生成视频
-        assets = text2video(script)
+        # 如果没有传入任务id，则生成当前日期和时间作为任务id，格式为YYYYMMDDHHMM
+        if not task_id:
+            task_id = datetime.datetime.now().strftime("%Y%m%d%H%M")
+        logger.info(f"任务ID: {task_id}")
+        
+        # 生成视频，传入任务id参数
+        assets = text2video(script, task_id)
         
         # 获取生成的视频文件列表
         video_files = [asset['video_file'] for asset in assets.values()]
-        
+        logger.info(f"任务ID {task_id} 生成视频文件列表: {video_files}")
         return JSONResponse(content={
             "message": "视频生成成功",
+            "task_id": task_id,
             "video_files": video_files
         })
     except Exception as e:

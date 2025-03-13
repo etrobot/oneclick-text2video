@@ -17,8 +17,27 @@ import io
 from silicon_flow import SiliconFlow,get_llm_config
 import glob
 import re
+import pandas as pd
+import sqlite3
+import datetime
 
 load_dotenv(find_dotenv())
+
+def sqlite_log(task_id, step_description, result_type, result):
+    # 获取当前时间戳
+    timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    # 构造日志字典
+    log_entry = {
+        'timestamp': timestamp,
+        'task_id': task_id,
+        'step': step_description,
+        'result_type': result_type,
+        'result': result
+    }
+    # 将日志字典转换为DataFrame并存入sqlite数据库
+    df = pd.DataFrame([log_entry])
+    with sqlite3.connect('task_logs.db') as conn:
+        df.to_sql('logs', conn, if_exists='append', index=False)
 
 # Add DebugLogger class before llm_gen_json function
 class DebugLogger:
