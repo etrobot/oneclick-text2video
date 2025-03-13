@@ -3,6 +3,11 @@
 
 OneClick Text2Video 是一个将文本脚本转换为视频的应用程序。它使用 OpenAI 和 Azure 的服务来生成音频和视频内容。
 
+
+https://github.com/user-attachments/assets/2475d410-a488-43a2-afd6-ed42654d99e4
+
+
+
 ## 安装
 
 1. 克隆此存储库到你的本地机器。
@@ -45,11 +50,5 @@ AZURE_TTS=你的Azure TTS订阅密钥
 - 根据文本生成视频片段。
 - 合并多个视频片段。
 - 生成视频缩略图。
-
-## 贡献
-
-欢迎贡献！请提交问题或请求合并。
-
-## 许可证
 
 此项目使用 MIT 许可证。
