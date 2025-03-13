@@ -6,8 +6,11 @@ import os
 import logging
 from pathlib import Path
 from makevideo import text2video, merge_videos
-import shutil
+from dotenv import load_dotenv,find_dotenv
 import datetime
+
+load_dotenv(find_dotenv())
+
 
 # 配置日志
 logging.basicConfig(
@@ -61,12 +64,12 @@ async def generate_video(script: str = Form(...), task_id: str = Form(None)):
             task_id = datetime.datetime.now().strftime("%Y%m%d%H%M")
         logger.info(f"任务ID: {task_id}")
         
-        # 生成视频，传入任务id参数
-        assets = text2video(script, task_id)
+        # 修改这里,将task_id作为关键字参数传入
+        assets = text2video(script, task_id=task_id)
         
         # 获取生成的视频文件列表
         video_files = [asset['video_file'] for asset in assets.values()]
-        logger.info(f"任务ID {task_id} 生成视频文件列表: {video_files}")
+        logger.log(f"任务ID {task_id} 生成视频文件列表: {video_files}")
         return JSONResponse(content={
             "message": "视频生成成功",
             "task_id": task_id,

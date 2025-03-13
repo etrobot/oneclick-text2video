@@ -23,6 +23,7 @@ import datetime
 
 load_dotenv(find_dotenv())
 
+
 def sqlite_log(task_id, step_description, result_type, result):
     # 获取当前时间戳
     timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -397,8 +398,18 @@ def get_next_available_id():
     ids = [int(re.search(r'id(\d+)\.mp3', f).group(1)) for f in audio_files]
     return max(ids) + 1
 
-@log_method(debug=False)
+@log_method(debug=True)
 def text2voice(text:str, auto_increment=True, id=None, voice_name='zh-CN-guangxi-YunqiNeural'):
+    logger = logging.getLogger(__name__)
+    logger.info(f"开始文本转语音，文本内容: {text}")
+    
+    # 验证环境变量
+    azure_key = os.getenv('AZURE_TTS')
+    if not azure_key:
+        logger.error("未找到 AZURE_TTS 环境变量")
+        raise ValueError("AZURE_TTS environment variable is not set")
+    logger.info("成功获取 AZURE_TTS key")
+    
     # 确保输出目录存在
     os.makedirs('output/audio', exist_ok=True)
     
@@ -412,56 +423,91 @@ def text2voice(text:str, auto_increment=True, id=None, voice_name='zh-CN-guangxi
     # 统一文件命名格式
     base_filename = f'id{file_id:02d}'
     filename = os.path.join('output/audio', base_filename + '.mp3')
+    logger.info(f"输出文件路径: {filename}")
     
-    speech_config = speechsdk.SpeechConfig(subscription=os.getenv('AZURE_TTS'), region="eastasia")
-    speech_config.set_speech_synthesis_output_format(speechsdk.SpeechSynthesisOutputFormat.Audio48Khz192KBitRateMonoMp3)
-    audio_config = speechsdk.audio.AudioOutputConfig(filename=filename)
-
-    speech_config.speech_synthesis_voice_name = voice_name
-
-    speech_synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
-    ssml = f"""
-    <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="zh-CN">
-        <voice name="{voice_name}">
-         <lexicon uri="https://raw.githubusercontent.com/etrobot/azure-tts-lexicon-cn/refs/heads/main/lexicon.xml"/>
-            <mstts:express-as style="cheerful">
-                <prosody rate="+20%" volume="-1%">
-                    {text}
-                </prosody>
-            </mstts:express-as>
-        </voice>
-    </speak>
-    """
-    word_boundaries = []
-    def handle_word_boundary(evt):
-        # 移除调试打印
-        word_boundaries.append({
-            'text': evt.text,
-            'audio_offset': evt.audio_offset / 10000000,
-            'duration': evt.duration.total_seconds(),
-        })
-    
-    speech_synthesizer.synthesis_word_boundary.connect(handle_word_boundary)
-
-    result = speech_synthesizer.speak_ssml_async(ssml).get()
-    if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-        print("Speech synthesized to speaker for text [{}]".format(text))
-        stream = speechsdk.AudioDataStream(result)
-        stream.save_to_wav_file(filename)
-    
-    return filename, word_boundaries, base_filename
+    try:
+        # 创建 SpeechConfig 时添加更多日志
+        logger.info("开始配置 Speech 服务...")
+        speech_config = speechsdk.SpeechConfig(subscription=azure_key, region="eastasia")
+        speech_config.set_speech_synthesis_output_format(speechsdk.SpeechSynthesisOutputFormat.Audio48Khz192KBitRateMonoMp3)
+        
+        # 验证语音配置
+        logger.info(f"语音配置: 区域=eastasia, 声音={voice_name}")
+        speech_config.speech_synthesis_voice_name = voice_name
+        
+        # 创建音频配置
+        audio_config = speechsdk.audio.AudioOutputConfig(filename=filename)
+        logger.info(f"音频输出配置已创建，输出文件: {filename}")
+        
+        # 创建合成器
+        speech_synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
+        logger.info("语音合成器已创建")
+        
+        # 清理SSML中的特殊字符
+        text = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        
+        # 简化SSML结构
+        ssml = f"""<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="zh-CN">
+            <voice name="{voice_name}">{text}</voice>
+        </speak>"""
+        logger.info(f"生成的SSML: {ssml}")
+        
+        word_boundaries = []
+        def handle_word_boundary(evt):
+            word_boundaries.append({
+                'text': evt.text,
+                'audio_offset': evt.audio_offset / 10000000,
+                'duration': evt.duration.total_seconds(),
+            })
+            logger.debug(f"Word boundary: {evt.text}, offset: {evt.audio_offset}, duration: {evt.duration}")
+        
+        # 添加取消事件处理
+        def handle_cancellation(evt):
+            logger.error(f"语音合成被取消: {evt.result.error_details}")
+            
+        speech_synthesizer.synthesis_word_boundary.connect(handle_word_boundary)
+        speech_synthesizer.synthesis_canceled.connect(handle_cancellation)
+        
+        # 执行语音合成
+        logger.info("开始执行语音合成...")
+        result = speech_synthesizer.speak_ssml_async(ssml).get()
+        
+        if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+            logger.info(f"语音合成成功完成")
+            # 验证文件是否成功生成
+            if os.path.exists(filename) and os.path.getsize(filename) > 0:
+                logger.info(f"音频文件成功生成，大小: {os.path.getsize(filename)} bytes")
+            else:
+                logger.error(f"音频文件生成失败或大小为0: {filename}")
+                raise Exception("Audio file generation failed")
+        else:
+            logger.error(f"语音合成失败: {result.reason}")
+            if hasattr(result, 'error_details'):
+                logger.error(f"错误详情: {result.error_details}")
+            raise Exception(f"Speech synthesis failed: {result.reason}")
+            
+        return filename, word_boundaries, base_filename
+        
+    except Exception as e:
+        logger.error(f"语音合成过程中发生错误: {str(e)}")
+        if os.path.exists(filename):
+            os.remove(filename)  # 清理可能的空文件
+        raise
 
 @log_method()
-def text2video(videoscript:str):
+def text2video(videoscript:str, task_id:str=None):
     """
     将文本脚本转换为视频
     Args:
         videoscript: 包含多行文本的字符串，每行将被转换为一个视频片段
+        task_id: 可选的任务ID，用于日志记录
     Returns:
         dict: 包含所有生成资产信息的字典
     """
     logger = logging.getLogger(__name__)
     logger.info(f"开始处理视频脚本: {videoscript}")
+    if task_id:
+        logger.info(f"任务ID: {task_id}")
     
     # 创建所有必要的输出目录
     os.makedirs('output', exist_ok=True)
@@ -478,6 +524,10 @@ def text2video(videoscript:str):
             continue
             
         logger.info(f"处理第 {id} 行文本: {line}")
+        
+        # 记录任务进度
+        if task_id:
+            sqlite_log(task_id, f"处理第{id}行文本", "text", line)
         
         # 使用 text2voice 生成音频和字幕信息
         audio_file, word_boundaries, base_filename = text2voice(line, auto_increment=True)
