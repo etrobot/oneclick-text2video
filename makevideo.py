@@ -263,75 +263,45 @@ def create_video_from_assets(asset, output_path, vertical=False):
     text = asset['text']
     word_boundaries = asset['word_boundaries']
     
-    # 根据标点符号分割文本
+    # 根据标点符号分割文本为句子
     sentences = []
     current_sentence = []
-    current_sentence_boundaries = []
     current_start = word_boundaries[0]['audio_offset']
     
     for i, word_info in enumerate(word_boundaries):
         word = word_info['text']
         if word not in ['.', '!', '?', ',','，','？','。']:
             current_sentence.append(word)
-            current_sentence_boundaries.append(word_info)
-            
         # 检查是否需要结束当前句子
         word_end_pos = text.find(word) + len(word)
         next_char = text[word_end_pos:word_end_pos+1] if word_end_pos < len(text) else ''
-        
-        if (next_char in ['.', '!', '?', ',','，','？','。'] or 
-            i == len(word_boundaries) - 1):
+        if (next_char in ['.', '!', '?', ',','，','？','。'] or i == len(word_boundaries) - 1):
             if current_sentence:
+                sentence_text = " ".join(current_sentence)
                 sentences.append({
-                    'words': current_sentence.copy(),
-                    'boundaries': current_sentence_boundaries.copy(),
+                    'text': sentence_text,
                     'start': current_start,
                     'end': word_info['audio_offset'] + word_info['duration']
                 })
             if i < len(word_boundaries) - 1:
                 current_start = word_boundaries[i + 1]['audio_offset']
             current_sentence = []
-            current_sentence_boundaries = []
     
-    # 为每个句子创建字幕
-    subtitle_clips = []
+    # 为每个句子创建字幕 (去除高亮逻辑，统一使用白色)
     for sentence in sentences:
-        # 为句子中的每个词创建一个高亮版本
-        for i, word_info in enumerate(sentence['boundaries']):
-            word = sentence['words'][i]
-            word_start = word_info['audio_offset']
-            word_duration = word_info['duration']
-            
-            # 构建带高亮词的句子文本
-            sentence_text = []
-            for j, w in enumerate(sentence['words']):
-                if j == i:
-                    # 当前词使用黄色
-                    text_clip = (TextClip(text=w, 
-                                        font='Hiragino Sans GB',
-                                        font_size=45,
-                                        size=(text_width, None),
-                                        color='yellow',  # 高亮词使用黄色
-                                        stroke_color='black',
-                                        stroke_width=2,
-                                        method='caption')
-                               .with_position(('center', video_height * 0.85))
-                               .with_start(word_start)
-                               .with_duration(word_duration))
-                else:
-                    # 其他词使用白色
-                    text_clip = (TextClip(text=w, 
-                                        font='Hiragino Sans GB',
-                                        font_size=45,
-                                        size=(text_width, None),
-                                        color='white',
-                                        stroke_color='black',
-                                        stroke_width=2,
-                                        method='caption')
-                               .with_position(('center', video_height * 0.85))
-                               .with_start(word_start)
-                               .with_duration(word_duration))
-                subtitle_clips.append(text_clip)
+        subtitle_duration = sentence['end'] - sentence['start']
+        text_clip = (TextClip(text=sentence['text'], 
+                          font='Hiragino Sans GB',
+                          font_size=45,
+                          size=(text_width, None),
+                          color='white',
+                          stroke_color='black',
+                          stroke_width=2,
+                          method='caption')
+                   .with_position(('center', video_height * 0.85))
+                   .with_start(sentence['start'])
+                   .with_duration(subtitle_duration))
+        subtitle_clips.append(text_clip)
     
     video_clips = []
     current_time = 0
@@ -361,10 +331,10 @@ def create_video_from_assets(asset, output_path, vertical=False):
         # 如果当前视频素材时长超出剩余音频时长，则裁剪
         remaining_duration = audio_duration - current_time
         if video.duration > remaining_duration:
-            video = video.subclipped(0, remaining_duration)
+            video = video.subclip(0, remaining_duration)
             logger.info(f"裁剪视频到 {remaining_duration:.2f}秒")
         
-        # 设置视频开始时间和位置（使用 with_position 和 with_start）
+        # 设置视频开始时间和位置
         video = video.with_position((x_center, y_center)).with_start(current_time)
         logger.info(f"设置视频位置: ({x_center}, {y_center}), 开始时间: {current_time:.2f}秒, 时长: {video.duration:.2f}秒")
         
@@ -374,7 +344,7 @@ def create_video_from_assets(asset, output_path, vertical=False):
     # 设置背景持续时间与音频相同
     background = background.with_duration(audio_duration)
     
-    # 将背景放在第一位，然后是所有的视频素材片段
+    # 将背景放在第一位，然后是所有的视频素材片段和字幕
     all_clips = [background] + video_clips + subtitle_clips
     
     # 合并所有视频片段

@@ -116,6 +116,7 @@
                     hx-trigger="click"
                     hx-include="#script"
                     hx-indicator="#spinner"
+                    hx-target="#notifications"
                     onclick="hideEditor()"
                 >
                     生成视频
@@ -255,9 +256,14 @@
             setTimeout(() => notification.remove(), 3000);
         }
 
-        // 添加自动刷新日志的函数
+        // 修改 refreshLogs 函数，使用当前选中的任务ID
         async function refreshLogs(taskId) {
             if (!taskId) return;
+            
+            // 如果传入的taskId与当前选中的不一致，则停止刷新
+            if (taskId !== document.getElementById('task-selector').value) {
+                return;
+            }
             
             try {
                 const response = await fetch(`/api/tasks/${taskId}/logs`);
@@ -295,14 +301,21 @@
                             // 触发change事件以加载视频
                             loadTaskVideos(data.task_id);
                             
+                            // 清除之前的定时器（如果存在）
+                            if (window.logRefreshInterval) {
+                                clearInterval(window.logRefreshInterval);
+                            }
+                            
                             // 设置定时刷新日志
-                            const refreshInterval = setInterval(async () => {
+                            window.logRefreshInterval = setInterval(async () => {
                                 await refreshLogs(data.task_id);
                             }, 2000); // 每2秒刷新一次
                             
                             // 60秒后停止刷新
                             setTimeout(() => {
-                                clearInterval(refreshInterval);
+                                if (window.logRefreshInterval) {
+                                    clearInterval(window.logRefreshInterval);
+                                }
                             }, 60000);
                         }
                         if (data.video_path) {
@@ -313,6 +326,7 @@
                     }
                 } catch (e) {
                     // 响应可能不是JSON格式
+                    console.error('解析响应失败:', e);
                 }
             }
         });
