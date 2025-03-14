@@ -175,3 +175,4 @@ cython_debug/
 *.jpg
 .DS_Store
 poetry.lock
+*.db
