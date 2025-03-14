@@ -15,36 +15,23 @@
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen p-8">
-    <div class="max-w-7xl mx-auto">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <!-- 左侧编辑器 -->
-            <div class="bg-white p-6 rounded-none shadow-lg">
-                <h2 class="text-2xl font-bold mb-4">文本编辑器</h2>
-                <div class="mb-4">
-                    <textarea
-                        id="script"
-                        name="script"
-                        class="w-full h-48 p-4 border rounded-none"
-                        placeholder="请输入文本..."
-                    ></textarea>
-                </div>
-                <div class="flex gap-4 mb-4">
-                    <button
-                        class="bg-blue-500 text-white px-6 py-2 rounded-none hover:bg-blue-600"
-                        hx-post="/generate-video"
-                        hx-trigger="click"
-                        hx-include="#script"
-                        hx-indicator="#spinner"
-                    >
-                        生成视频
-                    </button>
-                </div>
-                <div id="spinner" class="htmx-indicator">
-                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+    <div class="max-w-full mx-auto">
+        <div class="grid grid-cols-2 gap-6">
+            <!-- 左侧日志面板 -->
+            <div class="bg-white p-6 rounded-none shadow-lg h-[calc(100vh-4rem)] overflow-hidden">
+                <h2 class="text-2xl font-bold mb-4">项目日志</h2>
+                <div id="log-container" class="h-[calc(100%-2rem)] overflow-y-auto">
+                    <div class="space-y-2">
+                        <!-- 日志内容将通过JavaScript动态加载 -->
+                        <div class="p-2 border-l-4 border-blue-500">
+                            <div class="text-sm text-gray-600">2024-03-21 10:30:00</div>
+                            <div class="text-gray-800">开始生成视频...</div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <!-- 右侧预览 -->
+            <!-- 右侧视频预览 -->
             <div class="bg-white p-6 rounded-none shadow-lg">
                 <div class="flex items-center justify-between mb-4">
                     <h2 class="text-2xl font-bold">视频预览</h2>
@@ -65,6 +52,12 @@
                             onclick="deleteTask()"
                         >
                             删除任务
+                        </button>
+                        <button
+                            class="bg-blue-500 text-white px-4 py-2 rounded-none hover:bg-blue-600"
+                            onclick="showEditor()"
+                        >
+                            新建视频
                         </button>
                     </div>
                 </div>
@@ -97,6 +90,43 @@
         </div>
     </div>
 
+    <!-- 添加弹窗组件 -->
+    <div id="editor-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center">
+        <div class="bg-white p-6 rounded-none shadow-lg w-full max-w-2xl">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-2xl font-bold">文本编辑器</h2>
+                <button onclick="hideEditor()" class="text-gray-500 hover:text-gray-700">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            <div class="mb-4">
+                <textarea
+                    id="script"
+                    name="script"
+                    class="w-full h-48 p-4 border rounded-none"
+                    placeholder="请输入文本..."
+                ></textarea>
+            </div>
+            <div class="flex gap-4">
+                <button
+                    class="bg-blue-500 text-white px-6 py-2 rounded-none hover:bg-blue-600"
+                    hx-post="/generate-video"
+                    hx-trigger="click"
+                    hx-include="#script"
+                    hx-indicator="#spinner"
+                    onclick="hideEditor()"
+                >
+                    生成视频
+                </button>
+                <div id="spinner" class="htmx-indicator">
+                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- 通知区域 -->
     <div id="notifications" class="fixed bottom-4 right-4"></div>
 
@@ -109,29 +139,45 @@
                 document.getElementById('video-grid').innerHTML = '';
                 document.getElementById('delete-task-btn').classList.add('hidden');
                 document.getElementById('merge-container').classList.add('hidden');
+                document.getElementById('log-container').innerHTML = ''; // 清空日志
                 currentTaskId = null;
                 return;
             }
 
             try {
-                const response = await fetch(`/api/tasks/${taskId}/videos`);
-                const data = await response.json();
+                // 加载视频数据
+                const videoResponse = await fetch(`/api/tasks/${taskId}/videos`);
+                const videoData = await videoResponse.json();
+                
+                // 加载日志数据
+                const logResponse = await fetch(`/api/tasks/${taskId}/logs`);
+                const logData = await logResponse.json();
+                
                 currentTaskId = taskId;
+                
+                // 更新日志面板
+                const logContainer = document.getElementById('log-container');
+                logContainer.innerHTML = logData.logs.map(log => `
+                    <div class="p-2 border-l-4 border-blue-500">
+                        <div class="text-sm text-gray-600">${log.timestamp}</div>
+                        <div class="text-gray-800">${log.step}: ${log.result}</div>
+                    </div>
+                `).join('');
                 
                 // 显示删除按钮
                 document.getElementById('delete-task-btn').classList.remove('hidden');
 
-                if (data.videos && data.videos.length > 0) {
+                if (videoData.videos && videoData.videos.length > 0) {
                     // 更新主视频预览
                     document.getElementById('video-preview').innerHTML = `
                         <video id="current-video" controls class="w-full rounded-none shadow">
-                            <source src="${data.videos[0].video_url}" type="video/mp4">
+                            <source src="${videoData.videos[0].video_url}" type="video/mp4">
                             您的浏览器不支持视频播放。
                         </video>
                     `;
 
                     // 更新视频网格
-                    document.getElementById('video-grid').innerHTML = data.videos.map((video, index) => `
+                    document.getElementById('video-grid').innerHTML = videoData.videos.map((video, index) => `
                         <div class="video-thumbnail">
                             <img
                                 src="${video.thumbnail_url}"
@@ -151,7 +197,7 @@
                     document.getElementById('merge-container').classList.add('hidden');
                 }
             } catch (error) {
-                showNotification('加载视频失败', 'error');
+                showNotification('加载数据失败', 'error');
             }
         }
 
@@ -178,25 +224,23 @@
             }
         }
 
-        document.body.addEventListener('htmx:afterRequest', function(evt) {
-            const response = evt.detail.xhr.response;
-            if (response) {
-                try {
-                    const data = JSON.parse(response);
-                    if (data.message) {
-                        showNotification(data.message, 'success');
-                        // 如果生成了新视频，刷新页面
-                        if (data.task_id || data.video_path) {
-                            setTimeout(() => location.reload(), 1000);
-                        }
-                    } else if (data.error) {
-                        showNotification(data.error, 'error');
-                    }
-                } catch (e) {
-                    // 响应可能不是JSON格式
-                }
-            }
-        });
+        function updateLogs(message) {
+            const logContainer = document.getElementById('log-container');
+            const logEntry = document.createElement('div');
+            logEntry.className = 'p-2 border-l-4 border-blue-500';
+            
+            const timestamp = document.createElement('div');
+            timestamp.className = 'text-sm text-gray-600';
+            timestamp.textContent = new Date().toLocaleString();
+            
+            const content = document.createElement('div');
+            content.className = 'text-gray-800';
+            content.textContent = message;
+            
+            logEntry.appendChild(timestamp);
+            logEntry.appendChild(content);
+            logContainer.insertBefore(logEntry, logContainer.firstChild);
+        }
 
         function showNotification(message, type) {
             const notification = document.createElement('div');
@@ -210,6 +254,83 @@
             
             setTimeout(() => notification.remove(), 3000);
         }
+
+        // 添加自动刷新日志的函数
+        async function refreshLogs(taskId) {
+            if (!taskId) return;
+            
+            try {
+                const response = await fetch(`/api/tasks/${taskId}/logs`);
+                const data = await response.json();
+                
+                const logContainer = document.getElementById('log-container');
+                logContainer.innerHTML = data.logs.map(log => `
+                    <div class="p-2 border-l-4 border-blue-500">
+                        <div class="text-sm text-gray-600">${log.timestamp}</div>
+                        <div class="text-gray-800">${log.step}: ${log.result}</div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('刷新日志失败:', error);
+            }
+        }
+
+        document.body.addEventListener('htmx:afterRequest', function(evt) {
+            const response = evt.detail.xhr.response;
+            if (response) {
+                try {
+                    const data = JSON.parse(response);
+                    if (data.message) {
+                        showNotification(data.message, 'success');
+                        if (data.task_id) {
+                            // 自动选择新创建的任务
+                            const taskSelector = document.getElementById('task-selector');
+                            // 如果任务不在列表中，添加它
+                            if (!Array.from(taskSelector.options).some(opt => opt.value === data.task_id)) {
+                                const option = new Option(data.task_id, data.task_id);
+                                taskSelector.add(option);
+                            }
+                            // 选择新任务
+                            taskSelector.value = data.task_id;
+                            // 触发change事件以加载视频
+                            loadTaskVideos(data.task_id);
+                            
+                            // 设置定时刷新日志
+                            const refreshInterval = setInterval(async () => {
+                                await refreshLogs(data.task_id);
+                            }, 2000); // 每2秒刷新一次
+                            
+                            // 60秒后停止刷新
+                            setTimeout(() => {
+                                clearInterval(refreshInterval);
+                            }, 60000);
+                        }
+                        if (data.video_path) {
+                            setTimeout(() => location.reload(), 1000);
+                        }
+                    } else if (data.error) {
+                        showNotification(data.error, 'error');
+                    }
+                } catch (e) {
+                    // 响应可能不是JSON格式
+                }
+            }
+        });
+
+        function showEditor() {
+            document.getElementById('editor-modal').classList.remove('hidden');
+        }
+
+        function hideEditor() {
+            document.getElementById('editor-modal').classList.add('hidden');
+        }
+
+        // 点击弹窗背景时关闭弹窗
+        document.getElementById('editor-modal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                hideEditor();
+            }
+        });
     </script>
 </body>
 </html> 

@@ -11,6 +11,9 @@ import datetime
 import sqlite3
 import pandas as pd
 from typing import List, Dict
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import threading
 
 load_dotenv(find_dotenv())
 
@@ -39,6 +42,13 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # 确保必要的目录存在
 os.makedirs("output/video", exist_ok=True)
 os.makedirs("output/thumbnails", exist_ok=True)
+
+# 创建线程池执行器
+executor = ThreadPoolExecutor()
+
+# 添加全局变量和线程锁用于限制单个视频生成任务
+video_generation_lock = threading.Lock()
+video_generation_in_progress = False
 
 def scan_video_files():
     video_dir = Path("output/video")
@@ -131,10 +141,35 @@ async def home(request: Request):
         {"request": request, "task_ids": task_ids}
     )
 
+def generate_video_sync(script: str, task_id: str):
+    """同步执行视频生成的函数"""
+    global video_generation_in_progress
+    try:
+        logger.info(f"[generate_video_sync] 开始生成视频 task_id: {task_id}")
+        assets = text2video(script, task_id=task_id)
+        video_files = [asset['video_file'] for asset in assets.values()]
+        logger.info(f"[generate_video_sync] 视频生成完成 task_id: {task_id}, files: {video_files}")
+        return video_files
+    except Exception as e:
+        logger.error(f"[generate_video_sync] 生成视频出错 task_id: {task_id}, error: {str(e)}")
+        raise e
+    finally:
+        with video_generation_lock:
+            video_generation_in_progress = False
+
 @app.post("/generate-video")
 async def generate_video(script: str = Form(...)):
+    global video_generation_in_progress
+    # 检查是否已有视频生成任务在运行
+    with video_generation_lock:
+        if video_generation_in_progress:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "当前已有视频生成任务正在运行，请稍后再试"}
+            )
+        video_generation_in_progress = True
+
     try:
-        # 打印入参日志，方便问题定位
         logger.info(f"[generate_video] 入参 script: {script}")
         if not script.strip():
             return JSONResponse(
@@ -142,27 +177,23 @@ async def generate_video(script: str = Form(...)):
                 content={"error": "请输入文本"}
             )
         
-        # 自动生成任务ID，格式为YYYYMMDDHHMM
+        # 自动生成任务ID
         task_id = datetime.datetime.now().strftime("%Y%m%d%H%M")
         logger.info(f"[generate_video] 自动生成任务ID: {task_id}")
         
-        # 调用文本生成视频的方法，同时传入自动生成的任务ID
-        assets = text2video(script, task_id=task_id)
-        
-        # 收集生成的视频文件列表
-        video_files = [asset['video_file'] for asset in assets.values()]
-        logger.info(f"[generate_video] 任务ID {task_id} 生成视频文件列表: {video_files}")
+        # 使用线程池异步执行视频生成，不阻塞前端日志轮询
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(executor, generate_video_sync, script, task_id)
         
         return JSONResponse(content={
-            "message": "视频生成成功",
-            "task_id": task_id,
-            "video_files": video_files
+            "message": "视频生成任务已开始",
+            "task_id": task_id
         })
     except Exception as e:
-        logger.error(f"[generate_video] 生成视频时出错: {str(e)}")
+        logger.error(f"[generate_video] 创建视频生成任务时出错: {str(e)}")
         return JSONResponse(
             status_code=500,
-            content={"error": f"生成视频时出错: {str(e)}"}
+            content={"error": f"创建视频生成任务时出错: {str(e)}"}
         )
 
 @app.get("/video/{video_name}")
@@ -232,6 +263,23 @@ async def delete_task_endpoint(task_id: str):
             status_code=500,
             content={"error": "删除任务时出错"}
         )
+
+@app.get("/api/tasks/{task_id}/logs")
+async def get_task_logs(task_id: str):
+    """获取指定任务ID的所有日志"""
+    logger.info(f"开始获取任务ID {task_id} 的日志")
+    try:
+        with sqlite3.connect('task_logs.db') as conn:
+            df = pd.read_sql_query(
+                "SELECT timestamp, step, result_type, result FROM logs WHERE task_id = ? ORDER BY timestamp DESC",
+                conn,
+                params=(task_id,)
+            )
+            logs = df.to_dict('records')
+            return {'logs': logs}
+    except Exception as e:
+        logger.error(f"获取任务日志时出错: {str(e)}")
+        return {'logs': []}
 
 if __name__ == "__main__":
     import uvicorn

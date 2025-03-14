@@ -35,10 +35,26 @@ def sqlite_log(task_id, step_description, result_type, result):
         'result_type': result_type,
         'result': result
     }
-    # 将日志字典转换为DataFrame并存入sqlite数据库
-    df = pd.DataFrame([log_entry])
-    with sqlite3.connect('task_logs.db') as conn:
-        df.to_sql('logs', conn, if_exists='append', index=False)
+    
+    try:
+        # 将日志字典转换为DataFrame并存入sqlite数据库
+        df = pd.DataFrame([log_entry])
+        with sqlite3.connect('task_logs.db') as conn:
+            # 确保表存在
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS logs (
+                    timestamp TEXT,
+                    task_id TEXT,
+                    step TEXT,
+                    result_type TEXT,
+                    result TEXT
+                )
+            ''')
+            # 使用 to_sql 写入数据
+            df.to_sql('logs', conn, if_exists='append', index=False)
+            conn.commit()
+    except Exception as e:
+        print(f"写入日志失败: {e}")
 
 # Add DebugLogger class before llm_gen_json function
 class DebugLogger:
@@ -531,9 +547,10 @@ def text2video(videoscript:str, task_id:str=None):
         
         # 使用 text2voice 生成音频和字幕信息
         audio_file, word_boundaries, base_filename = text2voice(line, auto_increment=True)
+        if task_id:
+            sqlite_log(task_id, f"第{id}行音频生成", "audio", audio_file)
+            
         video_path = os.path.join('output/video', f"{base_filename}.mp4")
-        
-        logger.info(f"生成的音频文件: {audio_file}")
         
         assets[id] = {
             'audio_file': audio_file,
@@ -546,20 +563,28 @@ def text2video(videoscript:str, task_id:str=None):
         # 准备视频素材
         logger.info(f"开始准备视频素材")
         assets[id] = prepare_assets_with_videos(assets[id])
+        if task_id:
+            sqlite_log(task_id, f"第{id}行视频素材准备完成", "info", str(len(assets[id]['videos'])) + "个视频片段")
         
         # 创建最终视频
         logger.info(f"开始创建最终视频: {video_path}")
         assets[id] = create_video_from_assets(assets[id], video_path)
+        if task_id:
+            sqlite_log(task_id, f"第{id}行视频生成完成", "video", video_path)
         
         # 生成缩略图
         logger.info(f"生成视频缩略图")
         thumbnail = generate_thumbnail(video_path)
         assets[id]['thumbnail'] = thumbnail
+        if task_id and thumbnail:
+            sqlite_log(task_id, f"第{id}行缩略图生成", "thumbnail", thumbnail)
         
         logger.info(f"完成第 {id} 行文本的处理")
         id += 1
     
-    logger.info(f"视频生成完成，共处理 {id-1} 个片段")
+    if task_id:
+        sqlite_log(task_id, "任务完成", "info", f"共处理{id-1}个片段")
+    
     return assets
 
 @log_method(debug=False)
