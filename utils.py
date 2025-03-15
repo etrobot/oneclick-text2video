@@ -220,61 +220,97 @@ def text2voice(text: str, auto_increment=True, id=None, voice_name='zh-CN-guangx
             os.remove(filename)
         raise
 
-
-# text2video 函数
-
 @log_method()
-
-def text2video(videoscript: str, task_id: str = None):
+def prepare_assets_with_videos(asset):
     logger = logging.getLogger(__name__)
-    logger.info(f"开始处理视频脚本: {videoscript}")
-    if task_id:
-        logger.info(f"任务ID: {task_id}")
-
-    os.makedirs('output', exist_ok=True)
-    os.makedirs('output/video', exist_ok=True)
-    os.makedirs('output/audio', exist_ok=True)
-    os.makedirs('output/thumbnails', exist_ok=True)
+    # 打印入参信息
+    logger.info(f"入参 asset: {json.dumps({k: str(v) if not isinstance(v, (list, dict)) else v for k, v in asset.items()}, ensure_ascii=False, indent=2)}")
+    
+    audio = AudioFileClip(asset['audio_file'])
+    audio_duration = audio.duration
+    asset['duration'] = audio_duration
+    asset['videos'] = []
+    
+    text = asset['text']
+    keywords = extract_keywords(text)
+    
+    sf = SiliconFlow()
     os.makedirs('videos', exist_ok=True)
     
-    script_lines = videoscript.split('\n')
-    assets = {}
-    id_counter = 1
-    # 延迟导入 makevideo.py 中的依赖函数
-    from makevideo import prepare_assets_with_videos, create_video_from_assets, generate_thumbnail
-    
-    for line in script_lines:
-        if not line.strip():
+    total_video_duration = 0
+    keyword_index = 0
+    max_attempts = 10  # 防止无限循环
+    attempts = 0
+
+    while total_video_duration < audio_duration and attempts < max_attempts:
+        keyword = keywords[keyword_index % len(keywords)]
+        keyword_index += 1
+        logger.info(f"当前处理: 关键词={keyword}, 已生成视频时长={total_video_duration:.2f}秒, 目标音频时长={audio_duration:.2f}秒, 尝试次数={attempts + 1}")
+            
+        image_url = sf.generate_image(keyword)
+        if not image_url:
+            attempts += 1
             continue
-        logger.info(f"处理第 {id_counter} 行文本: {line}")
-        if task_id:
-            sqlite_log(task_id, f"处理第{id_counter}行文本", "text", line)
-        audio_file, word_boundaries, base_filename = text2voice(line, auto_increment=True)
-        if task_id:
-            sqlite_log(task_id, f"第{id_counter}行音频生成", "audio", audio_file)
-        video_path = os.path.join('output/video', f"{base_filename}.mp4")
-        assets[id_counter] = {
-            'audio_file': audio_file,
-            'text': line,
-            'word_boundaries': word_boundaries,
-            'video_file': video_path,
-            'base_filename': base_filename
-        }
-        logger.info("开始准备视频素材")
-        assets[id_counter] = prepare_assets_with_videos(assets[id_counter])
-        if task_id:
-            sqlite_log(task_id, f"第{id_counter}行视频素材准备完成", "info", str(len(assets[id_counter]['videos'])) + "个视频片段")
-        logger.info(f"开始创建最终视频: {video_path}")
-        assets[id_counter] = create_video_from_assets(assets[id_counter], video_path)
-        if task_id:
-            sqlite_log(task_id, f"第{id_counter}行视频生成完成", "video", video_path)
-        logger.info("生成视频缩略图")
-        thumbnail = generate_thumbnail(video_path)
-        assets[id_counter]['thumbnail'] = thumbnail
-        if task_id and thumbnail:
-            sqlite_log(task_id, f"第{id_counter}行缩略图生成", "thumbnail", thumbnail)
-        logger.info(f"完成第 {id_counter} 行文本的处理")
-        id_counter += 1
-    if task_id:
-        sqlite_log(task_id, "任务完成", "info", f"共处理{id_counter-1}个片段")
-    return assets 
+
+        video_url = sf.generate_video(keyword, image_url)
+        if not video_url:
+            attempts += 1
+            continue
+
+        try:
+            response = requests.get(video_url)
+            temp_video_path = f'videos/temp_{int(time.time())}.mp4'
+            with open(temp_video_path, 'wb') as f:
+                f.write(response.content)
+            
+            video_clip = VideoFileClip(temp_video_path)
+            video_duration = video_clip.duration
+            video_clip.close()
+            
+            total_video_duration += video_duration
+            asset['videos'].append(temp_video_path)
+            logger.info(f"成功添加视频: 路径={temp_video_path}, 时长={video_duration:.2f}秒, 累计视频时长={total_video_duration:.2f}秒")
+        except Exception as e:
+            logger.error(f"Error processing video: {str(e)}")
+            attempts += 1
+            if os.path.exists(temp_video_path):
+                os.remove(temp_video_path)
+            continue
+
+    # 在返回之前检查是否成功生成了视频
+    if not asset['videos']:
+        raise Exception("未能成功生成任何视频素材")
+    
+    audio.close()
+    
+    # 打印出参信息
+    logger.info(f"出参 asset: {json.dumps({k: str(v) if not isinstance(v, (list, dict)) else v for k, v in asset.items()}, ensure_ascii=False, indent=2)}")
+    return asset
+
+
+@log_method(debug=False)
+def generate_thumbnail(video_path, thumbnail_path=None):
+    """
+    从视频文件生成缩略图
+    Args:
+        video_path: 视频文件路径
+        thumbnail_path: 指定的缩略图保存路径
+    Returns:
+        str: 缩略图文件路径，如果生成失败则返回None
+    """
+    try:
+        if thumbnail_path is None:
+            os.makedirs('output/thumbnails', exist_ok=True)
+            thumbnail_path = os.path.join('output/thumbnails', 
+                                        os.path.splitext(os.path.basename(video_path))[0] + '.jpg')
+        
+        video = VideoFileClip(video_path)
+        frame = video.get_frame(0)
+        img = Image.fromarray(frame)
+        img.save(thumbnail_path, 'JPEG', quality=85)
+        video.close()
+        return thumbnail_path
+    except Exception as e:
+        logger.error(f"生成缩略图时发生错误: {str(e)}")
+        return None
+ 
