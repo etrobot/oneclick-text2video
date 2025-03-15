@@ -1,0 +1,57 @@
+{% for log in logs %}
+<div class="p-2 border-l-4 border-blue-500">
+    <div class="text-sm text-gray-600">{{ log.timestamp }}</div>
+    <div class="text-gray-800">
+        {{ log.step }}: 
+        <a href="#" 
+           class="text-blue-500 hover:text-blue-700 underline"
+           hx-get="/api/preview/{{ log.result_type }}/{{ log.result }}"
+           hx-target="#video-preview">
+            {% if log.result_type == 'text' %}
+                {{ log.result }}
+            {% else %}
+                点击预览{{ log.result_type }}
+            {% endif %}
+        </a>
+    </div>
+</div>
+{% endfor %} 
+
+// 只保留必要的JavaScript
+function showNotification(message, type) {
+    const notification = document.createElement('div');
+    notification.className = `p-4 rounded-none shadow-lg mb-2 ${
+        type === 'success' ? 'bg-green-500' : 'bg-red-500'
+    } text-white`;
+    notification.textContent = message;
+    
+    const notifications = document.getElementById('notifications');
+    notifications.appendChild(notification);
+    
+    setTimeout(() => notification.remove(), 3000);
+}
+
+function showEditor() {
+    document.getElementById('editor-modal').classList.remove('hidden');
+}
+
+function hideEditor() {
+    document.getElementById('editor-modal').classList.add('hidden');
+}
+
+// HTMX事件处理
+document.body.addEventListener('htmx:afterRequest', function(evt) {
+    if (evt.detail.successful) {
+        const response = evt.detail.xhr.response;
+        try {
+            const data = JSON.parse(response);
+            if (data.message) {
+                showNotification(data.message, 'success');
+            } else if (data.error) {
+                showNotification(data.error, 'error');
+            }
+        } catch (e) {
+            // 响应可能不是JSON格式，这是正常的
+        }
+    }
+}); 

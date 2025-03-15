@@ -19,23 +19,15 @@
         <div class="grid grid-cols-2 gap-6">
             <!-- 左侧日志面板 -->
             <div class="bg-white p-6 rounded-none shadow-lg h-[calc(100vh-4rem)] overflow-hidden">
-                <h2 class="text-2xl font-bold mb-4">项目日志</h2>
-                <div id="log-container" class="h-[calc(100%-2rem)] overflow-y-auto">
-                    <div class="space-y-2">
-                        <!-- 日志内容将通过JavaScript动态加载 -->
-                        <div class="p-2 border-l-4 border-blue-500">
-                            <div class="text-sm text-gray-600">2024-03-21 10:30:00</div>
-                            <div class="text-gray-800">开始生成视频...</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 右侧视频预览 -->
-            <div class="bg-white p-6 rounded-none shadow-lg">
-                <div class="flex items-center justify-between mb-4">
-                    <h2 class="text-2xl font-bold">视频预览</h2>
+                
+                <div class="flex items-center mb-4">
                     <div class="flex gap-4">
+                        <button
+                        class="bg-blue-500 text-white px-4 py-2 rounded-none hover:bg-blue-600"
+                        onclick="showEditor()"
+                    >
+                        新建视频
+                </button>
                         <select 
                             id="task-selector" 
                             class="p-2 border rounded-none"
@@ -53,37 +45,24 @@
                         >
                             删除任务
                         </button>
-                        <button
-                            class="bg-blue-500 text-white px-4 py-2 rounded-none hover:bg-blue-600"
-                            onclick="showEditor()"
-                        >
-                            新建视频
-                        </button>
                     </div>
                 </div>
-                
+                <div id="log-container" class="h-[calc(100%-2rem)] overflow-y-auto">
+                    <div class="space-y-2">
+                        <!-- 日志内容将通过JavaScript动态加载 -->
+                        <div class="p-2 border-l-4 border-blue-500">
+                            <div class="text-sm text-gray-600">2024-03-21 10:30:00</div>
+                            <div class="text-gray-800">开始生成视频...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右侧视频预览 -->
+            <div class="bg-white p-6 rounded-none shadow-lg">
                 <div id="video-preview" class="mb-8">
                     <div class="text-gray-500 text-center py-8">
                         请选择一个任务ID查看视频。
-                    </div>
-                </div>
-
-                <h3 class="text-xl font-bold mb-4">视频片段</h3>
-                <div id="video-grid" class="video-grid">
-                    <!-- 视频缩略图将通过JavaScript动态加载 -->
-                </div>
-
-                <div id="merge-container" class="mt-8 hidden">
-                    <button
-                        class="bg-green-500 text-white px-6 py-2 rounded-none hover:bg-green-600"
-                        hx-post="/merge-videos"
-                        hx-trigger="click"
-                        hx-indicator="#merge-spinner"
-                    >
-                        合并所有视频
-                    </button>
-                    <div id="merge-spinner" class="htmx-indicator">
-                        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500"></div>
                     </div>
                 </div>
             </div>
@@ -161,7 +140,14 @@
                 logContainer.innerHTML = logData.logs.map(log => `
                     <div class="p-2 border-l-4 border-blue-500">
                         <div class="text-sm text-gray-600">${log.timestamp}</div>
-                        <div class="text-gray-800">${log.step}: ${log.result}</div>
+                        <div class="text-gray-800">
+                            ${log.step}: 
+                            <a href="#" 
+                               class="text-blue-500 hover:text-blue-700 underline"
+                               onclick="previewResult('${log.result_type}', '${log.result}'); return false;">
+                                ${log.result_type === 'text' ? log.result : '点击预览' + log.result_type}
+                            </a>
+                        </div>
                     </div>
                 `).join('');
                 
@@ -345,6 +331,52 @@
                 hideEditor();
             }
         });
+
+        function previewResult(type, content) {
+            const previewContainer = document.getElementById('video-preview');
+            
+            switch(type) {
+                case 'text':
+                    previewContainer.innerHTML = `
+                        <div class="p-4 border rounded-none">
+                            <h3 class="text-lg font-bold mb-2">文本内容</h3>
+                            <p>${content}</p>
+                        </div>
+                    `;
+                    break;
+                    
+                case 'audio':
+                    previewContainer.innerHTML = `
+                        <div class="p-4 border rounded-none">
+                            <h3 class="text-lg font-bold mb-2">音频预览</h3>
+                            <audio controls class="w-full">
+                                <source src="/audio/${encodeURIComponent(content.split('/').pop())}" type="audio/mpeg">
+                                您的浏览器不支持音频播放。
+                            </audio>
+                        </div>
+                    `;
+                    break;
+                    
+                case 'video':
+                    previewContainer.innerHTML = `
+                        <div class="p-4 border rounded-none">
+                            <h3 class="text-lg font-bold mb-2">视频预览</h3>
+                            <video controls class="w-full">
+                                <source src="/video/${encodeURIComponent(content.split('/').pop())}" type="video/mp4">
+                                您的浏览器不支持视频播放。
+                            </video>
+                        </div>
+                    `;
+                    break;
+                    
+                default:
+                    previewContainer.innerHTML = `
+                        <div class="p-4 border rounded-none">
+                            <p class="text-gray-500">不支持预览该类型的内容</p>
+                        </div>
+                    `;
+            }
+        }
     </script>
 </body>
 </html> 

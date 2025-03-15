@@ -281,6 +281,25 @@ async def get_task_logs(task_id: str):
         logger.error(f"获取任务日志时出错: {str(e)}")
         return {'logs': []}
 
+@app.get("/audio/{audio_name}")
+async def get_audio(audio_name: str):
+    audio_path = Path(f"output/audio/{audio_name}")
+    if not audio_path.exists():
+        return JSONResponse(
+            status_code=404,
+            content={"error": "音频文件不存在"}
+        )
+    return FileResponse(str(audio_path))
+
+@app.route('/api/tasks/logs')
+def get_task_logs():
+    task_id = request.args.get('value')  # 从select的value获取task_id
+    if not task_id:
+        return '<div class="text-gray-500 text-center py-8">请选择一个任务ID查看日志。</div>'
+    
+    logs = get_logs_for_task(task_id)  # 获取日志的函数
+    return render_template('_logs.html', logs=logs)
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000) 
