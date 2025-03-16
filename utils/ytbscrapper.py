@@ -1,10 +1,11 @@
 import os
-from silicon_flow import get_llm_config
-from utils import llm_gen_json
 import webvtt
 from yt_dlp import YoutubeDL
 import browser_cookie3
-import tempfile
+from llm import llm_gen_json, get_llm_config
+import openai
+
+PROXY_URL="http://127.0.0.1:7890"
 
 class ytbScrapper:
     def __init__(self):
@@ -55,7 +56,8 @@ class ytbScrapper:
             'quiet': True,
             'no_warnings': True,
             'extract_flat': 'in_playlist',
-            'force_generic_extractor': True
+            'force_generic_extractor': True,
+            'proxy': PROXY_URL
         }
         
         if self.cookie_file:
@@ -117,7 +119,8 @@ class ytbScrapper:
             
         ydl_opts = {
             'format': 'best',
-            'outtmpl': f'{output_path}/%(title)s.%(ext)s'
+            'outtmpl': f'{output_path}/%(title)s.%(ext)s',
+            'proxy': PROXY_URL
         }
         
         if self.cookie_file:
@@ -132,24 +135,24 @@ class ytbScrapper:
             print(f"[error] 下载失败: {str(e)}")
             return False
 
-    def get_plain_subtitle_from_url(self, video_url: str) -> str:
-        """获取视频的纯文本字幕
-        
-        Args:
-            video_url (str): 视频URL
-            
-        Returns:
-            str: 字幕文本内容
+    def get_subtitle_table_from_url(self, video_url: str) -> str:
+        """获取视频字幕并以CSV格式返回
+           CSV格式包含：行数, 文本, 时间（开始 --> 结束）
         """
-        print(f"[log] 开始获取字幕: {video_url}")
+        print(f"[log] 开始获取字幕并转换成CSV: {video_url}")
+        
+        # 创建下载目录
+        download_dir = "downloads"
+        if not os.path.exists(download_dir):
+            os.makedirs(download_dir)
         
         ydl_opts = {
             'writeautomaticsub': True,
             'subtitleslangs': ['en'],
             'skip_download': True,
-            'outtmpl': 'temp_%(id)s',
+            'outtmpl': os.path.join(download_dir, 'temp_%(id)s'),
+            'proxy': PROXY_URL
         }
-        
         if self.cookie_file:
             ydl_opts['cookiefile'] = self.cookie_file
 
@@ -158,20 +161,40 @@ class ytbScrapper:
                 info = ydl.extract_info(video_url, download=True)
                 video_id = info['id']
                 
-                # 读取生成的VTT文件
-                vtt_file = f"temp_{video_id}.en.vtt"
+                vtt_file = os.path.join(download_dir, f"temp_{video_id}.en.vtt")
+                print(f"[log] 字幕文件路径: {vtt_file}")
+                
                 if os.path.exists(vtt_file):
                     vtt = webvtt.read(vtt_file)
-                    subtitle_text = '\n'.join(caption.text for caption in vtt.captions)
+                    csv_lines = []
+                    csv_lines_txt=""
+                    csv_lines.append("行数,文本,时间")
                     
+                    line_number = 1
+                    # 只处理偶数行的字幕
+                    for i, caption in enumerate(vtt.captions):
+                        if i % 2 == 1:  # 只取偶数行（因为i从0开始）
+                            text = caption.text.replace("\n", " ").replace(",", " ").strip()
+                            time_str = f"{caption.start} --> {caption.end}"
+                            csv_lines.append(f"{line_number},{text},{time_str}")
+                            csv_lines_txt+=f"{line_number},{text}\n"
+                            line_number += 1
+                    print(f"[log] 字幕文本: {csv_lines_txt}")
+                    api_key, base_url = get_llm_config('openai')
+                    keywords_format = {
+                        "start_line_number": "summary of the video script lines"
+                    }
+                    client = openai.Client(api_key=api_key, base_url=base_url)
+                    prompt = f'''{csv_lines_txt}
+                    combine the video script above into paragraphs with start line number
+                    '''
+                    video_summary = llm_gen_json(client, os.getenv('LLM_MODEL'), prompt, keywords_format)
                     # 清理临时文件
-                    os.remove(vtt_file)
-                    
-                    return subtitle_text
+                    # os.remove(vtt_file)
+                    return video_summary
                 else:
-                    print("[warning] 未找到字幕文件")
+                    print(f"[warning] 未找到字幕文件: {vtt_file}")
                     return ""
-                    
         except Exception as e:
             print(f"[error] 获取字幕失败: {str(e)}")
             return ""
@@ -179,7 +202,7 @@ class ytbScrapper:
 if __name__ == '__main__':
     scrapper = ytbScrapper()
     # 测试搜索
-    results = scrapper.search_video("python tutorial")
+    results = scrapper.search_video("manus")
     for video in results:
         print(f"标题: {video['title']}")
         print(f"作者: {video['author']}")
@@ -188,6 +211,6 @@ if __name__ == '__main__':
         
         # 测试下载和字幕
         # scrapper.download_video(video['url'], output_path="./downloads")
-        # subtitle = scrapper.get_plain_subtitle_from_url(video['url'])
-        # print(f"字幕预览: {subtitle[:200]}...")
+        subtitle_table = scrapper.get_subtitle_table_from_url(video['url'])
+        print(f"字幕表格:\n{subtitle_table}")
         break

@@ -21,6 +21,8 @@ dependencies = [
     "requests>=2.32.3",
     "streamlit>=1.43.2",
     "uvicorn>=0.34.0",
+    "webvtt-py>=0.5.1",
+    "yt-dlp>=2025.2.19",
 ]
 
 [tool.setuptools.packages.find]

@@ -1,17 +1,10 @@
 import requests
 import random,time
-import os,json
+import json
 import logging
 from openai import OpenAI
+from llm import get_llm_config
 
-
-def get_llm_config(scheme='openai'):
-    apikey=os.getenv("OPENAI_API_KEY")
-    base_url=os.getenv("OPENAI_BASE_URL")
-    if scheme == 'siliconflow':
-        apikey=os.getenv("SILICONFLOW_API_KEY")
-        base_url=os.getenv("SILICONFLOW_BASE_URL")
-    return apikey,base_url
 
 class SiliconFlow:
     def __init__(self):

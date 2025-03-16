@@ -4,46 +4,9 @@ import openai
 from dotenv import load_dotenv,find_dotenv
 import logging
 from PIL import Image
-from silicon_flow import get_llm_config
-from utils import sqlite_log, log_method, llm_gen_json, text2voice, prepare_assets_with_videos
+from utils import sqlite_log, log_method, text2voice, prepare_assets_with_videos, generate_thumbnail
 
 load_dotenv(find_dotenv())
-
-@log_method(debug=True)  # 开启调试日志
-def extract_keywords(text):
-    logger = logging.getLogger(__name__)
-    logger.info(f"开始提取关键词，文本内容: {text}")
-    
-    api_key, base_url = get_llm_config('siliconflow')
-    keywords_format = {
-        "keywords": ["keyword1", "keyword2", "keyword3"]
-    }
-    client = openai.Client(api_key=api_key, base_url=base_url)
-    prompt = f'''
-    generate 3-5 short stable diffusion prompts in English for the following video script with the structure as location+role+action+object like "in the office, a ol is taking to the screen, the video script is":
-    text: {text}
-    '''
-    
-    logger.info("开始调用 LLM 生成关键词")
-    keywords = llm_gen_json(client, os.getenv('LLM_MODEL'), prompt, keywords_format)
-    
-    if not keywords:
-        logger.warning("生成关键词失败，使用默认关键词")
-        return ["happy celebration", "festive atmosphere", "red lantern"]
-        
-    result = keywords.get('keywords', [])
-    logger.info(f"生成的关键词: {result}")
-    
-    # 过滤非ASCII字符的关键词
-    filtered_keywords = [k for k in result if k.isascii()]
-    logger.info(f"过滤后的关键词: {filtered_keywords}")
-    
-    if not filtered_keywords:
-        logger.warning("过滤后没有有效关键词，使用默认关键词")
-        return ["happy celebration", "festive atmosphere", "red lantern"]
-        
-    return filtered_keywords[:3]  # 限制返回3个关键词
-
 # text2video 函数
 
 @log_method()
